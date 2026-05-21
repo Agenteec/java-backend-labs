@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: recipe_db_container
+    environment:
+      POSTGRES_DB: recipe_db
+      POSTGRES_USER: recipe_admin
+      POSTGRES_PASSWORD: recipe_password
+    ports:
+      - "5432:5432"

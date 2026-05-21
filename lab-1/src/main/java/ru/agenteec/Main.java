@@ -12,7 +12,7 @@ import java.util.TreeMap;
 
 public class Main {
     public static void main(String[] args) {
-        String inputPath = null;
+        String inputPath = "characters.csv";
         String outputPath = "gender_stats.csv";
 
         for (int i = 0; i < args.length; i++) {
@@ -32,11 +32,14 @@ public class Main {
 
         CharacterRepository repository = new CharacterRepository();
         CharacterService service = new CharacterService();
-
-        List<Character> characters = repository.readFromFile(inputPath);
+        List<Character> characters;
+        try {
+            characters = repository.loadRecipesFromResources(inputPath);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
 
         TreeMap<String, Integer> genderStats = service.calculateGenderStatistics(characters);
-
         writeStatisticsToFile(outputPath, genderStats);
 
         System.out.println("Сохранено в: " + outputPath);
