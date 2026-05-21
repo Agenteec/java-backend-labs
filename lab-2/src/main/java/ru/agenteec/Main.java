@@ -9,8 +9,13 @@ import liquibase.database.jvm.JdbcConnection;
 import liquibase.resource.ClassLoaderResourceAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.agenteec.entity.RecipeEntity;
 import ru.agenteec.repository.RecipeRepository;
+import ru.agenteec.service.RecipeService;
+import ru.agenteec.service.RecipeServiceImpl;
+import ru.agenteec.controller.RecipeController;
+
+import java.io.InputStream;
+import java.sql.Connection;
 
 import java.util.Properties;
 
@@ -18,11 +23,17 @@ public class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
+        log.info("Starting Recipe Application...");
+
         Properties props = new Properties();
-        try (var is = Main.class.getClassLoader().getResourceAsStream("db.properties")) {
+        try (InputStream is = Main.class.getClassLoader().getResourceAsStream("db.properties")) {
+            if (is == null) {
+                log.error("Could not find db.properties in resources!");
+                return;
+            }
             props.load(is);
         } catch (Exception e) {
-            log.error("Could not load db.properties");
+            log.error("Error loading database properties", e);
             return;
         }
 
@@ -30,37 +41,74 @@ public class Main {
         config.setJdbcUrl(props.getProperty("db.url"));
         config.setUsername(props.getProperty("db.user"));
         config.setPassword(props.getProperty("db.password"));
+        config.setDriverClassName("org.postgresql.Driver");
 
-        try (HikariDataSource ds = new HikariDataSource(config)) {
-            try (java.sql.Connection connection = ds.getConnection()) {
-                Database database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(connection));
-                Liquibase liquibase = new Liquibase("db/changelog/db.changelog-master.xml", new ClassLoaderResourceAccessor(), database);
-                liquibase.update("");
-                log.info("Migrations applied successfully");
-            }
+        config.setMaximumPoolSize(10);
+        config.setMinimumIdle(2);
+        config.setIdleTimeout(30000);
+        config.setConnectionTimeout(20000);
 
-            RecipeRepository repository = new RecipeRepository(ds);
+        try (HikariDataSource dataSource = new HikariDataSource(config)) {
 
-            int id = repository.save(new RecipeEntity("Borsch", 500));
-            log.info("Saved recipe with ID: {}", id);
+            runMigrations(dataSource);
 
-            RecipeEntity found = repository.findById(id);
-            log.info("Found by ID: {}", found);
+            RecipeRepository repository = new RecipeRepository(dataSource);
 
-            RecipeEntity byName = repository.findByField("Borsch");
-            log.info("Found by Name: {}", byName);
+            RecipeService service = new RecipeServiceImpl(repository);
 
-            found.setCalories(450);
-            repository.update(found);
-            log.info("Updated recipe: {}", repository.findById(id));
+            RecipeController controller = new RecipeController(service);
 
-            log.info("All recipes: {}", repository.findAll());
+            log.info("Application layers initialized successfully.");
 
-            repository.deleteById(id);
-            log.info("Deleted. Remaining: {}", repository.findAll().size());
+            demoService(service);
+
+            controller.start(8080);
 
         } catch (Exception e) {
-            log.error("Application error", e);
+            log.error("Critical application error", e);
         }
+    }
+
+
+    private static void runMigrations(HikariDataSource ds) {
+        log.info("Running Liquibase migrations...");
+        try (Connection connection = ds.getConnection()) {
+            Database database = DatabaseFactory.getInstance()
+                    .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+
+            Liquibase liquibase = new Liquibase(
+                    "db/changelog/db.changelog-master.xml",
+                    new ClassLoaderResourceAccessor(),
+                    database
+            );
+
+            liquibase.update("");
+            log.info("Database migrations applied successfully.");
+        } catch (Exception e) {
+            log.error("Migration failed!", e);
+            throw new RuntimeException("Could not update database schema", e);
+        }
+    }
+
+
+    private static void demoService(RecipeService service) {
+        log.info("--- Service Layer Demo ---");
+        try {
+            int id = service.save("Pasta Carbonara", 650);
+            log.info("Created recipe with ID: {}", id);
+
+            var recipe = service.findById(id);
+            log.info("Read recipe: {}", recipe);
+
+            recipe.setName("Updated Carbonara");
+            service.update(recipe);
+            log.info("Updated name to: {}", service.findById(id).getName());
+
+            log.info("Current total recipes in DB: {}", service.findAll().size());
+
+        } catch (Exception e) {
+            log.warn("Demo notice: {}", e.getMessage());
+        }
+        log.info("--- Demo finished ---");
     }
 }
