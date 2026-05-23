@@ -6,6 +6,8 @@ import ru.agenteec.entity.RecipeEntity;
 import ru.agenteec.exception.RecipeNotFoundException;
 import ru.agenteec.service.RecipeService;
 
+import static io.javalin.apibuilder.ApiBuilder.*;
+
 public class RecipeController {
     private final RecipeService service;
 
@@ -14,31 +16,36 @@ public class RecipeController {
     }
 
     public void start(int port) {
-        Javalin app = Javalin.create().start(port);
+        Javalin.create(config -> {
 
-        app.exception(RecipeNotFoundException.class, (e, ctx) -> {
-            ctx.status(HttpStatus.NOT_FOUND);
-            ctx.json(java.util.Map.of("error", e.getMessage()));
-        });
+            config.routes.exception(RecipeNotFoundException.class, (e, ctx) -> {
+                ctx.status(HttpStatus.NOT_FOUND);
+                ctx.json(java.util.Map.of("error", e.getMessage()));
+            });
 
-        app.get("/recipes", ctx -> ctx.json(service.findAll()));
+            config.routes.apiBuilder(() -> {
+                path("/recipes", () -> {
+                    get(ctx -> ctx.json(service.findAll()));
+                    post(ctx -> {
+                        RecipeEntity recipe = ctx.bodyAsClass(RecipeEntity.class);
+                        int id = service.save(recipe.getName(), recipe.getCalories());
+                        ctx.status(HttpStatus.CREATED).result(String.valueOf(id));
+                    });
+                    path("/{id}", () -> {
+                        get(ctx -> {
+                            int id = Integer.parseInt(ctx.pathParam("id"));
+                            ctx.json(service.findById(id));
+                        });
+                        delete(ctx -> {
+                            int id = Integer.parseInt(ctx.pathParam("id"));
+                            service.deleteById(id);
+                            ctx.status(HttpStatus.NO_CONTENT);
+                        });
+                    });
+                });
+            });
 
-        app.get("/recipes/{id}", ctx -> {
-            int id = Integer.parseInt(ctx.pathParam("id"));
-            ctx.json(service.findById(id));
-        });
-
-        app.post("/recipes", ctx -> {
-            RecipeEntity recipe = ctx.bodyAsClass(RecipeEntity.class);
-            int id = service.save(recipe.getName(), recipe.getCalories());
-            ctx.status(HttpStatus.CREATED).result(String.valueOf(id));
-        });
-
-        app.delete("/recipes/{id}", ctx -> {
-            int id = Integer.parseInt(ctx.pathParam("id"));
-            service.deleteById(id);
-            ctx.status(HttpStatus.NO_CONTENT);
-        });
+        }).start(port);
 
         System.out.println("Server started on http://localhost:" + port);
     }
